@@ -1,76 +1,122 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
+	"os"
+	"strconv"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
+	supa "github.com/supabase-community/supabase-go"
 )
 
-type Person struct {
-	Name string `json:"name"`
-	Age  int    `json:"age"`
+var supabase *supa.Client
+
+type Todo struct {
+    ID          int    `json:"id"`
+    Title       string    `json:"title"`
+    Description string    `json:"description"`
 }
+
+
 
 func main() {
-	http.HandleFunc("/person", personHandler)
-	fmt.Println("Server is running on port 8080")
-	http.ListenAndServe(":8080", nil)
-}
+	log := logrus.New()
+	log.SetFormatter(&logrus.TextFormatter{
+		ForceColors:     true,
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05",
+	})
+	log.SetReportCaller(true)
+	// gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
 
-func helloHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Hello World")
-}
 
-func personHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost{
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
+	r.Use(gin.LoggerWithFormatter(func(param gin.LogFormatterParams) string {
+		return fmt.Sprintf("%s - [%s] \"%s %s %s %d %s \"%s\" %s\"\n",
+			param.ClientIP,
+			param.TimeStamp.Format(time.RFC1123),
+			param.Method,
+			param.Path,
+			param.Request.Proto,
+			param.StatusCode,
+			param.Latency,
+			param.Request.UserAgent(),
+			param.ErrorMessage)
+	}))
 
-	constentType := r.Header.Get("Content-Type")
-	if constentType != "application/json" {
-		http.Error(w, "Content type not supported", http.StatusUnsupportedMediaType)
-		return
-	}
+	r.Use(gin.Recovery())
 
-	r.Body = http.MaxBytesReader(w, r.Body, 1048576)
-
-	var person Person
-
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-
-	err := dec.Decode(&person)
-
-	if err != nil {
-		var syntaxError *json.SyntaxError
-		var unmarshalTypeError *json.UnmarshalTypeError
-
-		switch  {
-		case err == io.EOF:
-			http.Error(w, "Request body must not be empty", http.StatusBadRequest)
-		case err.Error() == "json: unknown field {field}":
-			http.Error(w, "Request body must not be larger than 1MB", http.StatusRequestEntityTooLarge)
-		case err == io.ErrUnexpectedEOF:
-			http.Error(w, "Request body contains badly-formed JSON", http.StatusBadRequest)
-		case err.(*json.SyntaxError) != nil:
-			http.Error(w, fmt.Sprintf("Request body contains badly-formed JSON (at position %d)", syntaxError.Offset), http.StatusBadRequest)
-		case err.(*json.UnmarshalTypeError) != nil:
-			http.Error(w, fmt.Sprintf("Request body contains an invalid value for the %q field (at position %d)", unmarshalTypeError.Field, unmarshalTypeError.Offset), http.StatusBadRequest)
-		default:
-			log.Println(err.Error())
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-		}
-		return
-	}
-
-	if dec.More() {
-		http.Error(w, "Request body must only contain a single JSON object", http.StatusBadRequest)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(person)
+	supabaseUrl := os.Getenv("SUPABASE_URL")
+	supabaseAnonKey := os.Getenv("SUPABASE_KEY")
 	
+	supabaseClient, err := supa.NewClient(supabaseUrl, supabaseAnonKey, nil)
+	if err != nil {
+		log.Fatal("Error initializing Supabase client:", err)
+		panic(err)
+	}
+	supabase = supabaseClient
+
+	r.GET("/todos", getTodos)
+	r.POST("/todos", createTodo)
+	r.GET("/todos/:id", getTodo)
+	r.PUT("/todos/:id", updateTodo)
+	r.DELETE("/todos/:id", deleteTodo)
+
+	log.Info("Starting server on :8080")
+	log.WithFields(logrus.Fields{
+		"port": 8080,
+	}).Info("Listening for requests")
+	if err := r.Run(":8080"); err != nil {
+		log.Fatal("Failed to start server: ", err)
+	}
+
+}
+
+
+func getTodos(c *gin.Context) {
+	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
+	perPage, _ := strconv.Atoi(c.DefaultQuery("size", "10"))
+
+
+	if page < 1{
+		page = 1
+	}
+	if perPage < 1{
+		perPage = 10
+	}
+
+	start := (page - 1) * perPage
+    end := start + perPage
+
+	var todos []Todo
+	_, err := supabase.From("todos").Select("*", "exact", false).Range(start, end, "").ExecuteTo(&todos)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+
+	c.JSON(http.StatusOK, gin.H{"todos": todos})
+}
+
+func createTodo(c *gin.Context) {
+	c.JSON(http.StatusCreated, gin.H{"message": "Create a new todo"})
+}
+
+func getTodo(c *gin.Context) {
+	id := c.Param("id")
+	c.JSON(http.StatusOK, gin.H{"message": "Get todo " + id})
+}
+
+func updateTodo(c *gin.Context) {
+	id := c.Param("id")
+	c.JSON(http.StatusOK, gin.H{"message": "Update todo " + id})
+}
+
+func deleteTodo(c *gin.Context) {
+	id := c.Param("id")
+	c.JSON(http.StatusOK, gin.H{"message": "Delete todo " + id})
 }
