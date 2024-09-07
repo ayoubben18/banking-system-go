@@ -1,6 +1,6 @@
 module github.com/ayoubben18/go-supabase-server
 
-go 1.21.6
+go 1.23.1
 
 require (
 	github.com/bytedance/sonic v1.12.2 // indirect

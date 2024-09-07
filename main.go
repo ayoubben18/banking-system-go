@@ -103,20 +103,104 @@ func getTodos(c *gin.Context) {
 }
 
 func createTodo(c *gin.Context) {
-	c.JSON(http.StatusCreated, gin.H{"message": "Create a new todo"})
+	var newTodo Todo
+	if err := c.BindJSON(&newTodo); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	}
+
+	todo := map[string]interface{}{
+        "title":       newTodo.Title,
+        "description": newTodo.Description,
+    }
+
+	var inserted []Todo
+	_, err := supabase.From("todos").Insert(todo, false, "", "", "exact").ExecuteTo(&inserted)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(inserted) == 0 {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "No data inserted"})
+		return
+	}
+
+
+	c.JSON(http.StatusCreated, gin.H{"message": "Create a new todo", "data": inserted[0]})
 }
 
 func getTodo(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{"message": "Get todo " + id})
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		return
+	}
+
+	var todo Todo
+	_, err = supabase.From("todos").Select("*", "exact", false).Single().Eq("id", strconv.Itoa(id)).ExecuteTo(&todo)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Get todo %d", id), "data": todo})
 }
 
 func updateTodo(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{"message": "Update todo " + id})
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		return
+	}
+	fmt.Println("id", id)
+
+	var newTodo Todo
+	if err := c.BindJSON(&newTodo); err != nil {
+		fmt.Println("err", err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	}
+
+	updateData := map[string]interface{}{
+		"title":       newTodo.Title,
+		"description": newTodo.Description,
+		// Add other fields you want to update, but exclude 'id'
+	}
+
+	var updated []Todo
+	_, err = supabase.From("todos").Update(updateData, "", "").Eq("id", strconv.Itoa(id)).ExecuteTo(&updated)
+	if err != nil {
+		fmt.Println("err", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(updated) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Update todo %d", id), "data": updated[0]})
 }
 
 func deleteTodo(c *gin.Context) {
-	id := c.Param("id")
-	c.JSON(http.StatusOK, gin.H{"message": "Delete todo " + id})
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid ID"})
+		return
+	}
+
+	var deleted []Todo
+	_, err = supabase.From("todos").Delete("","").Eq("id", strconv.Itoa(id)).ExecuteTo(&deleted)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(deleted) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Todo not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": fmt.Sprintf("Delete todo %d", id), "data": deleted[0]})
 }
